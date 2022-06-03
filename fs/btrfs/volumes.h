@@ -371,6 +371,9 @@ struct btrfs_bio {
 	u8 csum_inline[BTRFS_BIO_INLINE_CSUM_SIZE];
 	struct bvec_iter iter;
 
+	/* For read end I/O handling */
+	struct work_struct end_io_work;
+
 	/*
 	 * This member must come last, bio_alloc_bioset will allocate enough
 	 * bytes for entire btrfs_bio but relies on bio being last.
@@ -391,9 +394,30 @@ static inline void btrfs_bio_free_csum(struct btrfs_bio *bbio)
 	}
 }
 
+/*
+ * Iterate through a btrfs_bio (@bbio) on a per-sector basis.
+ *
+ * bvl        - struct bio_vec
+ * bbio       - struct btrfs_bio
+ * iters      - struct bvec_iter
+ * bio_offset - unsigned int
+ */
+#define btrfs_bio_for_each_sector(fs_info, bvl, bbio, iter, bio_offset)	\
+	for ((iter) = (bbio)->iter, (bio_offset) = 0;			\
+	     (iter).bi_size &&					\
+	     (((bvl) = bio_iter_iovec((&(bbio)->bio), (iter))), 1);	\
+	     (bio_offset) += fs_info->sectorsize,			\
+	     bio_advance_iter_single(&(bbio)->bio, &(iter),		\
+	     (fs_info)->sectorsize))
+
 struct btrfs_io_stripe {
 	struct btrfs_device *dev;
-	u64 physical;
+	union {
+		/* Block mapping */
+		u64 physical;
+		/* For the endio handler */
+		struct btrfs_io_context *bioc;
+	};
 	u64 length; /* only used for discard mappings */
 };
 
