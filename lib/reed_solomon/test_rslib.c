@@ -42,9 +42,11 @@ struct etab {
 	int	ntrials;
 };
 
+#define RS16_GFPOLY 0x1002d
+
 /* List of codes to test */
 static struct etab Tab[] = {
-	{2,	0x7,	1,	1,	1,	100000	},
+	/*{2,	0x7,	1,	1,	1,	100000	},
 	{3,	0xb,	1,	1,	2,	100000	},
 	{3,	0xb,	1,	1,	3,	100000	},
 	{3,	0xb,	2,	1,	4,	100000	},
@@ -54,7 +56,8 @@ static struct etab Tab[] = {
 	{7,	0x89,	1,	1,	14,	500	},
 	{8,	0x11d,	1,	1,	30,	100	},
 	{8,	0x187,	112,	11,	32,	100	},
-	{9,	0x211,	1,	1,	33,	80	},
+	{9,	0x211,	1,	1,	33,	80	},*/
+	{16,RS16_GFPOLY,1,	1,	33,	100	},
 	{0, 0, 0, 0, 0, 0},
 };
 
@@ -439,6 +442,19 @@ static int exercise_rs_bc(struct rs_control *rs, struct wspace *ws,
 	return stat.noncw;
 }
 
+
+static int gf_mul(int x)
+{
+	//printk("x=%04x\n", x);
+	x = be16_to_cpu(x);
+	if (x == 0)
+		return cpu_to_be16(1);
+	x <<= 1;
+	if (x & 0x10000)
+		x ^= RS16_GFPOLY;
+	x &= 0xFFFF;
+	return cpu_to_be16(x);
+}
 static int run_exercise(struct etab *e)
 {
 	int nn = (1 << e->symsize) - 1;
@@ -450,7 +466,8 @@ static int run_exercise(struct etab *e)
 	struct wspace *ws;
 	int i;
 
-	rsc = init_rs(e->symsize, e->genpoly, e->fcs, e->prim, e->nroots);
+	//rsc = init_rs(e->symsize, e->genpoly, e->fcs, e->prim, e->nroots);
+	rsc = init_rs_non_canonical(e->symsize, gf_mul, e->fcs, e->prim, e->nroots);
 	if (!rsc)
 		return retval;
 
