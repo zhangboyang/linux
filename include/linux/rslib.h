@@ -28,6 +28,7 @@
  * @iprim:	prim-th root of 1, index form
  * @gfpoly:	The primitive generator polynominal
  * @gffunc:	Function to generate the field, if non-canonical representation
+ * @gfswab:	Treat symbols as foreign endian, may be true only if mm = 16
  * @users:	Users of this structure
  * @list:	List entry for the rs codec list
 */
@@ -43,6 +44,7 @@ struct rs_codec {
 	int		iprim;
 	int		gfpoly;
 	int		(*gffunc)(int);
+	bool		gfswab;
 	int		users;
 	struct list_head list;
 };
@@ -99,6 +101,28 @@ static inline struct rs_control *init_rs(int symsize, int gfpoly, int fcr,
 					 int prim, int nroots)
 {
 	return init_rs_gfp(symsize, gfpoly, fcr, prim, nroots, GFP_KERNEL);
+}
+
+struct rs_control *init_rs16_gfp(int gfpoly, bool gfswab, int fcr, int prim,
+				 int nroots, gfp_t gfp);
+
+/**
+ * init_rs16 - Allocate rs control struct for 16 bit symbols
+ *  @gfpoly:	the extended Galois field generator polynomial coefficients,
+ *		with the 0th coefficient in the low order bit. The polynomial
+ *		must be primitive;
+ *  @gfswab:	Treat symbols as foreign endian
+ *  @fcr:	the first consecutive root of the rs code generator polynomial
+ *		in index form
+ *  @prim:	primitive element to generate polynomial roots
+ *  @nroots:	RS code generator polynomial degree (number of roots)
+ *
+ * Allocations use GFP_KERNEL.
+ */
+static inline struct rs_control *init_rs16(int gfpoly, bool gfswab, int fcr,
+					   int prim, int nroots)
+{
+	return init_rs16_gfp(gfpoly, gfswab, fcr, prim, nroots, GFP_KERNEL);
 }
 
 struct rs_control *init_rs_non_canonical(int symsize, int (*func)(int),

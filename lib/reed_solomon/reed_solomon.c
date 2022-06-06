@@ -56,9 +56,10 @@ static DEFINE_MUTEX(rslistlock);
 
 /**
  * codec_init - Initialize a Reed-Solomon codec
- * @symsize:	symbol size, bits (1-8)
+ * @symsize:	the symbol size (number of bits)
  * @gfpoly:	Field generator polynomial coefficients
  * @gffunc:	Field generator function
+ * @gfswab:	Treat symbols as foreign endian, may be true only if symsize=16
  * @fcr:	first root of RS code generator polynomial, index form
  * @prim:	primitive element to generate polynomial roots
  * @nroots:	RS code generator polynomial degree (number of roots)
@@ -67,7 +68,8 @@ static DEFINE_MUTEX(rslistlock);
  * Allocate a codec structure and the polynom arrays for faster
  * en/decoding. Fill the arrays according to the given parameters.
  */
-static struct rs_codec *codec_init(int symsize, int gfpoly, int (*gffunc)(int),
+static struct rs_codec *codec_init(int symsize,
+				   int gfpoly, int (*gffunc)(int), bool gfswab,
 				   int fcr, int prim, int nroots, gfp_t gfp)
 {
 	int i, j, sr, root, iprim;
@@ -86,6 +88,7 @@ static struct rs_codec *codec_init(int symsize, int gfpoly, int (*gffunc)(int),
 	rs->nroots = nroots;
 	rs->gfpoly = gfpoly;
 	rs->gffunc = gffunc;
+	rs->gfswab = gfswab;
 
 	/* Allocate the arrays */
 	rs->alpha_to = kmalloc_array(rs->nn + 1, sizeof(uint16_t), gfp);
@@ -105,13 +108,16 @@ static struct rs_codec *codec_init(int symsize, int gfpoly, int (*gffunc)(int),
 	rs->alpha_to[rs->nn] = 0;	/* alpha**-inf = 0 */
 	if (gfpoly) {
 		sr = 1;
+		sr = gfswab ? swab16(sr) : sr;
 		for (i = 0; i < rs->nn; i++) {
 			rs->index_of[sr] = i;
 			rs->alpha_to[i] = sr;
+			sr = gfswab ? swab16(sr) : sr;
 			sr <<= 1;
 			if (sr & (1 << symsize))
 				sr ^= gfpoly;
 			sr &= rs->nn;
+			sr = gfswab ? swab16(sr) : sr;
 		}
 	} else {
 		sr = gffunc(0);
@@ -204,6 +210,7 @@ EXPORT_SYMBOL_GPL(free_rs);
  *  @gffunc:	pointer to function to generate the next field element,
  *		or the multiplicative identity element if given 0.  Used
  *		instead of gfpoly if gfpoly is 0
+ *  @gfswab:	Treat symbols as foreign endian, may be true only if symsize=16
  *  @fcr:	the first consecutive root of the rs code generator polynomial
  *		in index form
  *  @prim:	primitive element to generate polynomial roots
@@ -211,8 +218,9 @@ EXPORT_SYMBOL_GPL(free_rs);
  *  @gfp:	GFP_ flags for allocations
  */
 static struct rs_control *init_rs_internal(int symsize, int gfpoly,
-					   int (*gffunc)(int), int fcr,
-					   int prim, int nroots, gfp_t gfp)
+					   int (*gffunc)(int), bool gfswab,
+					   int fcr, int prim, int nroots,
+					   gfp_t gfp)
 {
 	struct list_head *tmp;
 	struct rs_control *rs;
@@ -226,6 +234,8 @@ static struct rs_control *init_rs_internal(int symsize, int gfpoly,
 	if (prim <= 0 || prim >= (1<<symsize))
 		return NULL;
 	if (nroots < 0 || nroots >= (1<<symsize))
+		return NULL;
+	if (gfswab && symsize != 16)
 		return NULL;
 
 	/*
@@ -250,6 +260,8 @@ static struct rs_control *init_rs_internal(int symsize, int gfpoly,
 			continue;
 		if (gffunc != cd->gffunc)
 			continue;
+		if (gfswab != cd->gfswab)
+			continue;
 		if (fcr != cd->fcr)
 			continue;
 		if (prim != cd->prim)
@@ -263,7 +275,8 @@ static struct rs_control *init_rs_internal(int symsize, int gfpoly,
 	}
 
 	/* Create a new one */
-	rs->codec = codec_init(symsize, gfpoly, gffunc, fcr, prim, nroots, gfp);
+	rs->codec = codec_init(symsize, gfpoly, gffunc, gfswab,
+			       fcr, prim, nroots, gfp);
 	if (!rs->codec) {
 		kfree(rs);
 		rs = NULL;
@@ -288,9 +301,30 @@ out:
 struct rs_control *init_rs_gfp(int symsize, int gfpoly, int fcr, int prim,
 			       int nroots, gfp_t gfp)
 {
-	return init_rs_internal(symsize, gfpoly, NULL, fcr, prim, nroots, gfp);
+	return init_rs_internal(symsize, gfpoly, NULL, false,
+				fcr, prim, nroots, gfp);
 }
 EXPORT_SYMBOL_GPL(init_rs_gfp);
+
+/**
+ * init_rs16_gfp - Allocate rs control struct for 16 bit symbols
+ *  @gfpoly:	the extended Galois field generator polynomial coefficients,
+ *		with the 0th coefficient in the low order bit. The polynomial
+ *		must be primitive;
+ *  @gfswab:	Treat symbols as foreign endian
+ *  @fcr:	the first consecutive root of the rs code generator polynomial
+ *		in index form
+ *  @prim:	primitive element to generate polynomial roots
+ *  @nroots:	RS code generator polynomial degree (number of roots)
+ *  @gfp:	Memory allocation flags.
+ */
+struct rs_control *init_rs16_gfp(int gfpoly, bool gfswab, int fcr, int prim,
+				 int nroots, gfp_t gfp)
+{
+	return init_rs_internal(16, gfpoly, NULL, gfswab,
+				fcr, prim, nroots, gfp);
+}
+EXPORT_SYMBOL_GPL(init_rs16_gfp);
 
 /**
  * init_rs_non_canonical - Allocate rs control struct for fields with
@@ -307,7 +341,7 @@ EXPORT_SYMBOL_GPL(init_rs_gfp);
 struct rs_control *init_rs_non_canonical(int symsize, int (*gffunc)(int),
 					 int fcr, int prim, int nroots)
 {
-	return init_rs_internal(symsize, 0, gffunc, fcr, prim, nroots,
+	return init_rs_internal(symsize, 0, gffunc, false, fcr, prim, nroots,
 				GFP_KERNEL);
 }
 EXPORT_SYMBOL_GPL(init_rs_non_canonical);

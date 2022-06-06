@@ -36,6 +36,7 @@ __param(int, bc, 1, "Test for correct behaviour beyond error correction capacity
 struct etab {
 	int	symsize;
 	int	genpoly;
+	bool	byteswap;
 	int	fcs;
 	int	prim;
 	int	nroots;
@@ -44,17 +45,18 @@ struct etab {
 
 /* List of codes to test */
 static struct etab Tab[] = {
-	{2,	0x7,	1,	1,	1,	100000	},
-	{3,	0xb,	1,	1,	2,	100000	},
-	{3,	0xb,	1,	1,	3,	100000	},
-	{3,	0xb,	2,	1,	4,	100000	},
-	{4,	0x13,	1,	1,	4,	10000	},
-	{5,	0x25,	1,	1,	6,	1000	},
-	{6,	0x43,	3,	1,	8,	1000	},
-	{7,	0x89,	1,	1,	14,	500	},
-	{8,	0x11d,	1,	1,	30,	100	},
-	{8,	0x187,	112,	11,	32,	100	},
-	{9,	0x211,	1,	1,	33,	80	},
+	{2,	0x7,	false,	1,	1,	1,	100000	},
+	{3,	0xb,	false,	1,	1,	2,	100000	},
+	{3,	0xb,	false,	1,	1,	3,	100000	},
+	{3,	0xb,	false,	2,	1,	4,	100000	},
+	{4,	0x13,	false,	1,	1,	4,	10000	},
+	{5,	0x25,	false,	1,	1,	6,	1000	},
+	{6,	0x43,	false,	3,	1,	8,	1000	},
+	{7,	0x89,	false,	1,	1,	14,	500	},
+	{8,	0x11d,	false,	1,	1,	30,	100	},
+	{8,	0x187,	false,	112,	11,	32,	100	},
+	{9,	0x211,	false,	1,	1,	33,	80	},
+	{16,  0x1002d,	true,	1,	1,	33,	5	},
 	{0, 0, 0, 0, 0, 0},
 };
 
@@ -450,7 +452,12 @@ static int run_exercise(struct etab *e)
 	struct wspace *ws;
 	int i;
 
-	rsc = init_rs(e->symsize, e->genpoly, e->fcs, e->prim, e->nroots);
+	if (e->symsize != 16)
+		rsc = init_rs(e->symsize, e->genpoly,
+			      e->fcs, e->prim, e->nroots);
+	else
+		rsc = init_rs16(e->genpoly, e->byteswap,
+				e->fcs, e->prim, e->nroots);
 	if (!rsc)
 		return retval;
 
