@@ -100,6 +100,10 @@ static struct rs_codec *codec_init(int symsize, int gfpoly, int (*gffunc)(int),
 	if(rs->genpoly == NULL)
 		goto err;
 
+	rs->genroot = kmalloc_array(rs->nroots, sizeof(uint16_t), gfp);
+	if(rs->genroot == NULL)
+		goto err;
+
 	/* Generate Galois field lookup tables */
 	rs->index_of[0] = rs->nn;	/* log(zero) = -inf */
 	rs->alpha_to[rs->nn] = 0;	/* alpha**-inf = 0 */
@@ -126,26 +130,34 @@ static struct rs_codec *codec_init(int symsize, int gfpoly, int (*gffunc)(int),
 		goto err;
 
 	/* Find prim-th root of 1, used in decoding */
-	for(iprim = 1; (iprim % prim) != 0; iprim += rs->nn);
+	for (iprim = 1; rs_modnn_mul(rs, iprim, prim) != 1; iprim++);
 	/* prim-th root of 1, index form */
-	rs->iprim = iprim / prim;
+	rs->iprim = iprim;
+
+	/* Precompute generator polynomial roots */
+	root = rs_modnn_mul(rs, fcr, prim);
+	for (i = 0; i < nroots; i++) {
+		rs->genroot[i] = root; /*  = (fcr + i) * prim % nn  */
+		root = rs_modnn_fast(rs, root + prim);
+	}
 
 	/* Form RS code generator polynomial from its roots */
 	rs->genpoly[0] = rs->alpha_to[0];
-	for (i = 0, root = fcr * prim; i < nroots; i++, root += prim) {
+	for (i = 0; i < nroots; i++) {
+		root = rs->genroot[i];
 		rs->genpoly[i + 1] = rs->alpha_to[0];
 		/* Multiply rs->genpoly[] by  @**(root + x) */
 		for (j = i; j > 0; j--) {
 			if (rs->genpoly[j] != 0) {
-				rs->genpoly[j] = rs->genpoly[j -1] ^
-					rs->alpha_to[rs_modnn(rs,
+				rs->genpoly[j] = rs->genpoly[j - 1] ^
+					rs->alpha_to[rs_modnn_fast(rs,
 					rs->index_of[rs->genpoly[j]] + root)];
 			} else
 				rs->genpoly[j] = rs->genpoly[j - 1];
 		}
 		/* rs->genpoly[0] can never be zero */
 		rs->genpoly[0] =
-			rs->alpha_to[rs_modnn(rs,
+			rs->alpha_to[rs_modnn_fast(rs,
 				rs->index_of[rs->genpoly[0]] + root)];
 	}
 	/* convert rs->genpoly[] to index form for quicker encoding */
@@ -157,6 +169,7 @@ static struct rs_codec *codec_init(int symsize, int gfpoly, int (*gffunc)(int),
 	return rs;
 
 err:
+	kfree(rs->genroot);
 	kfree(rs->genpoly);
 	kfree(rs->index_of);
 	kfree(rs->alpha_to);
@@ -188,6 +201,7 @@ void free_rs(struct rs_control *rs)
 		kfree(cd->alpha_to);
 		kfree(cd->index_of);
 		kfree(cd->genpoly);
+		kfree(cd->genroot);
 		kfree(cd);
 	}
 	mutex_unlock(&rslistlock);
@@ -340,7 +354,7 @@ EXPORT_SYMBOL_GPL(encode_rs8);
  *  @data:	data field of a given type
  *  @par:	received parity data field
  *  @len:	data length
- *  @s: 	syndrome data field, must be in index form
+ *  @s: 	syndrome data field, must be in index form, 0 <= index <= nn
  *		(if NULL, syndrome is calculated)
  *  @no_eras:	number of erasures
  *  @eras_pos:	position of erasures, can be NULL
@@ -393,7 +407,7 @@ EXPORT_SYMBOL_GPL(encode_rs16);
  *  @data:	data field of a given type
  *  @par:	received parity data field
  *  @len:	data length
- *  @s: 	syndrome data field, must be in index form
+ *  @s: 	syndrome data field, must be in index form, 0 <= index <= nn
  *		(if NULL, syndrome is calculated)
  *  @no_eras:	number of erasures
  *  @eras_pos:	position of erasures, can be NULL
